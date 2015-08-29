@@ -173,45 +173,61 @@ def submit_job(pbs_script, pbs_config, pbs_vars=None):
     pbs_flags = []
 
     pbs_queue = pbs_config.get('queue', 'normal')
-    pbs_flags.append('-q {}'.format(pbs_queue))
+    if format(pbs_queue) != 'normal':
+        pbs_flags.append('--reservation {}'.format(pbs_queue))
+
+    pbs_flags.append('--exclusive')
 
     pbs_project = pbs_config.get('project', os.environ['PROJECT'])
-    pbs_flags.append('-P {}'.format(pbs_project))
+    pbs_flags.append('-A {}'.format(pbs_project))
 
-    pbs_resources = ['walltime', 'ncpus', 'mem', 'jobfs']
+    walltime = pbs_config.get('walltime')
+    pbs_flags.append('-t {}'.format(walltime))
 
-    for res_key in pbs_resources:
-        res_flags = []
-        res_val = pbs_config.get(res_key)
-        if res_val:
-            res_flags.append('{}={}'.format(res_key, res_val))
+    ncpus = pbs_config.get('ncpus')
+    if ncpus < 16:
+        pbs_flags.append('-c {}'.format(ncpus))
+    else:   
+        nodes = ncpus / 16
+        pbs_flags.append('-N {}'.format(nodes))
 
-        if res_flags:
-            pbs_flags.append('-l {}'.format(','.join(res_flags)))
+    memlim = pbs_config.get('mem')
+    pbs_flags.append('--mem {}'.format(memlim))
 
-    # TODO: Need to pass lab.config_path somehow...
-    pbs_jobname = pbs_config.get('jobname', os.path.basename(os.getcwd()))
+    #pbs_resources = ['walltime', 'ncpus', 'mem', 'jobfs']
+
+    #for res_key in pbs_resources:
+    #    res_flags = []
+    #    res_val = pbs_config.get(res_key)
+    #    if res_val:
+    #        res_flags.append('{}={}'.format(res_key, res_val))
+
+    #    if res_flags:
+    #       pbs_flags.append('-l {}'.format(','.join(res_flags)))
+
+    pbs_jobname = pbs_config.get('jobname')
     if pbs_jobname:
         # PBSPro has a 15-character jobname limit
-        pbs_flags.append('-N {}'.format(pbs_jobname[:15]))
+        pbs_flags.append('-J {}'.format(pbs_jobname[:15]))
 
-    pbs_priority = pbs_config.get('priority')
-    if pbs_priority:
-        pbs_flags.append('-p {}'.format(pbs_priority))
+    #pbs_priority = pbs_config.get('priority')
+    #if pbs_priority:
+    #    pbs_flags.append('-p {}'.format(pbs_priority))
 
-    pbs_flags.append('-l wd')
+    #pbs_flags.append('-l wd')
 
-    pbs_join = pbs_config.get('join', 'n')
-    if pbs_join not in ('oe', 'eo', 'n'):
-        print('payu: error: unknown qsub IO stream join setting.')
-        sys.exit(-1)
-    else:
-        pbs_flags.append('-j {}'.format(pbs_join))
+    #pbs_join = pbs_config.get('join', 'oe')
+    #if pbs_join not in ('oe', 'eo', 'n'):
+    #    print('payu: error: unknown qsub IO stream join setting.')
+    #    sys.exit(-1)
+    #else:
+    #    pbs_flags.append('-j {}'.format(pbs_join))
 
+    pbs_vars['PROJECT'] = pbs_project
     if pbs_vars:
         pbs_vstring = ','.join('{}={}'.format(k, v)
                                for k, v in pbs_vars.iteritems())
-        pbs_flags.append('-v ' + pbs_vstring)
+        pbs_flags.append('--export ' + pbs_vstring)
 
     # Append any additional qsub flags here
     pbs_flags_extend = pbs_config.get('qsub_flags')
@@ -219,8 +235,8 @@ def submit_job(pbs_script, pbs_config, pbs_vars=None):
         pbs_flags.append(pbs_flags_extend)
 
     # Enable PBS, in case it's not available
-    envmod.setup()
-    envmod.module('load', 'pbs')
+    #envmod.setup()
+    #envmod.module('load', 'pbs')
 
     # If script path does not exist, then check the PATH directories
     if not os.path.isabs(pbs_script):
@@ -230,7 +246,7 @@ def submit_job(pbs_script, pbs_config, pbs_vars=None):
                 break
 
     # Construct full command
-    cmd = 'qsub {} {}'.format(' '.join(pbs_flags), pbs_script)
+    cmd = 'sbatch {} {}'.format(' '.join(pbs_flags), pbs_script)
     print(cmd)
 
     subprocess.check_call(shlex.split(cmd))

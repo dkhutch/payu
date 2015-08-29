@@ -23,7 +23,7 @@ def runcmd(model_type, config_path, init_run, n_runs, lab_path, dir_path):
     pbs_config = cli.get_config(config_path)
     pbs_vars = cli.set_env_vars(init_run, n_runs, lab_path, dir_path)
 
-    collate_queue = pbs_config.get('collate_queue', 'copyq')
+    collate_queue = pbs_config.get('collate_queue', 'normal')
     pbs_config['queue'] = collate_queue
 
     n_cpus_request = pbs_config.get('collate_ncpus', 1)

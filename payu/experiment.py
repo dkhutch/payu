@@ -177,7 +177,7 @@ class Experiment(object):
 
         # MPI library
         mpi_config = self.config.get('mpi', {})
-        mpi_modname = mpi_config.get('module', 'openmpi')
+        mpi_modname = mpi_config.get('module', 'mpprun')
         self.modules.add(mpi_modname)
 
         # Unload non-essential modules
@@ -192,20 +192,13 @@ class Experiment(object):
         for mod in self.modules:
             envmod.module('load', mod)
 
-        # User-defined modules
-        user_modules = self.config.get('modules', [])
-        for mod in user_modules:
-            envmod.module('load', mod)
-
-        envmod.module('list')
-
         # TODO: Consolidate this profiling stuff
         c_ipm = self.config.get('ipm', False)
         if c_ipm:
             if isinstance(c_ipm, str):
                 ipm_mod = os.path.join('ipm', c_ipm)
             else:
-                ipm_mod = 'ipm/2.0.2'
+                ipm_mod = 'ipm'
 
             envmod.module('load', ipm_mod)
             os.environ['IPM_LOGDIR'] = self.work_path
@@ -222,9 +215,6 @@ class Experiment(object):
 
         if self.config.get('scorep', False):
             envmod.module('load', 'scorep')
-
-        if self.config.get('openspeedshop', False):
-            envmod.module('load', 'openspeedshop')
 
         if self.debug:
             envmod.module('load', 'totalview')
@@ -345,12 +335,9 @@ class Experiment(object):
             prof = ProfType(self)
             self.profilers.append(prof)
 
-            # Testing
-            prof.setup()
-
     def run(self, *user_flags):
 
-        self.load_modules()
+        #self.load_modules()
 
         f_out = open(self.stdout_fname, 'w')
         f_err = open(self.stderr_fname, 'w')
@@ -372,12 +359,12 @@ class Experiment(object):
             os.environ[var] = env_value
 
         mpi_config = self.config.get('mpi', {})
-        mpi_runcmd = mpi_config.get('runcmd', 'mpirun')
+        mpi_runcmd = mpi_config.get('runcmd', 'mpprun')
 
         if self.config.get('scalasca', False):
             mpi_runcmd = ' '.join(['scalasca -analyze', mpi_runcmd])
 
-        mpi_flags = self.config.get('mpirun')
+        mpi_flags = self.config.get('mpprun')
         # Correct an empty mpirun entry
         if mpi_flags is None:
             mpi_flags = []
@@ -408,14 +395,14 @@ class Experiment(object):
 
             # Update MPI library module (if not explicitly set)
             # TODO: Check for MPI library mismatch across multiple binaries
-            if mpi_module is None:
-                mpi_module = envmod.lib_update(model.exec_path, 'libmpi.so')
+            #if mpi_module is None:
+                #mpi_module = envmod.lib_update(model.exec_path, 'libmpi.so')
 
             model_prog = []
 
             # Our MPICH wrapper does not support a working directory flag
-            if not mpi_module.startswith('mvapich'):
-                model_prog.append('-wdir {}'.format(model.work_path))
+            #if not mpi_module.startswith('mvapich'):
+            #    model_prog.append('-wdir {}'.format(model.work_path))
 
             # Append any model-specific MPI flags
             model_flags = model.config.get('mpiflags', [])
@@ -445,8 +432,7 @@ class Experiment(object):
                 model_prog.append('hpcrun')
 
             for prof in self.profilers:
-                if prof.wrapper:
-                    model_prog.append(prof.wrapper)
+                model_prog.append(prof.wrapper)
 
             model_prog.append(model.exec_prefix)
             model_prog.append(model.exec_path)
@@ -456,32 +442,17 @@ class Experiment(object):
         cmd = '{} {} {}'.format(mpi_runcmd,
                                 ' '.join(mpi_flags),
                                 ' : '.join(mpi_progs))
-
-        oss = self.config.get('openspeedshop')
-        if oss:
-            oss_runcmd = oss.get('runcmd')
-            if not oss_runcmd:
-                print('payu: error: OpenSpeedShop requires an executable.')
-                sys.exit(1)
-
-            oss_hwc = oss.get('hwc')
-            if oss_runcmd.startswith('osshwc') and not oss_hwc:
-                print('payu: error: This OSS command requires hardware '
-                      'counters.')
-                sys.exit(1)
-
-            cmd = '{} "{}" {}'.format(oss_runcmd, cmd, oss_hwc)
-
         print(cmd)
 
         # Our MVAPICH wrapper does not support working directories
-        if mpi_module.startswith('mvapich'):
-            curdir = os.getcwd()
-            os.chdir(self.work_path)
-        else:
-            curdir = None
+        #if mpi_module.startswith('mvapich'):
+        #    curdir = os.getcwd()
+        #    os.chdir(self.work_path)
+        #else:
+        #    curdir = None
+        curdir = os.getcwd()
+        os.chdir(self.work_path)
 
-        #if env:
         if env:
             # TODO: Replace with mpirun -x flag inputs
             proc = sp.Popen(shlex.split(cmd), stdout=f_out, stderr=f_err,
@@ -608,7 +579,7 @@ class Experiment(object):
         """Submit a postprocessing script after collation"""
         assert self.postscript
 
-        cmd = 'qsub {}'.format(self.postscript)
+        cmd = 'sbatch {}'.format(self.postscript)
 
         cmd = shlex.split(cmd)
         rc = sp.call(cmd)
@@ -767,12 +738,11 @@ class Experiment(object):
             f for f in os.listdir(os.curdir) if os.path.isfile(f) and (
                 f == self.stdout_fname or
                 f == self.stderr_fname or
-                f.startswith(short_job_name + '.o') or
-                f.startswith(short_job_name + '.e') or
-                f.startswith(short_job_name[:13] + '_c.o') or
-                f.startswith(short_job_name[:13] + '_c.e') or
-                f.startswith(short_job_name[:13] + '_p.o') or
-                f.startswith(short_job_name[:13] + '_p.e')
+                f.startswith('slurm-')
+                #f.startswith(short_job_name + '.o') or
+                #f.startswith(short_job_name + '.e') or
+                #f.startswith(short_job_name[:13] + '_c.o') or
+                #f.startswith(short_job_name[:13] + '_c.e')
             )
         ]
 
