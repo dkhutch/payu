@@ -1,9 +1,10 @@
+# coding: utf-8
 """payu.reversion
    ==============
 
    Update the Python executable of an active process to a more recent version.
 
-   :copyright: Copyright 2011 Marshall Ward, see AUTHORS for details
+   :copyright: Copyright 2011 Marshall Ward
    :license: Apache License, Version 2.0, see LICENSE for details
 """
 
@@ -45,7 +46,7 @@ def repython(version, script_path):
 
         # First unload all python (and supporting) modules
         python_modules = [m for m in os.environ['LOADEDMODULES'].split(':')
-                          if m.startswith('python/')]
+                          if m.startswith('python')]
 
         for mod in python_modules:
             envmod.module('unload', mod)

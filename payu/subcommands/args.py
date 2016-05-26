@@ -61,16 +61,6 @@ laboratory = {
 }
 
 
-force_archive = {
-    'flags': ('--archive',),
-    'parameters': {
-        'action':   'store_true',
-        'dest':     'force_archive',
-        'help':     'Create archive directory during setup',
-    }
-}
-
-
 hard_sweep = {
     'flags': ('--hard',),
     'parameters': {

@@ -1,11 +1,3 @@
-"""payu.namcouple
-   ==============
-
-   OASIS Namcouple parser
-
-   :copyright: Copyright 2014 Nicholas Hannah
-"""
-
 import re
 import sys
 
@@ -29,7 +21,7 @@ class Namcouple:
 
         m = re.search(r"^[ \t]*\$RUNTIME.*?^[ \t]*(\d+)", self.str,
                       re.MULTILINE | re.DOTALL)
-        assert m is not None
+        assert(m is not None)
         self.str = self.str[:m.start(1)] + str(runtime) + self.str[m.end(1):]
 
     def substitute_timestep(self, regex, timestep):

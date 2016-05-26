@@ -48,11 +48,6 @@ class Experiment(object):
         # TODO: __init__ should not be a config dumping ground!
         self.config = read_config()
 
-        # Payu experiment type
-        self.debug = self.config.get('debug', False)
-        self.postscript = self.config.get('postscript')
-        self.repeat_run = self.config.get('repeat', False)
-
         # Model run time
         self.runtime = None
         if ('calendar' in self.config and
@@ -82,12 +77,16 @@ class Experiment(object):
 
         self.profilers = []
 
+        self.debug = self.config.get('debug', False)
+        self.postscript = self.config.get('postscript')
+        self.repeat_run = self.config.get('repeat', False)
+
         init_script = self.userscripts.get('init')
         if init_script:
             self.run_userscript(init_script)
 
         # Logging
-        if self.config.get('runlog', True):
+        if self.config.get('runlog', False):
             self.runlog = Runlog(self)
         else:
             self.runlog = None
@@ -153,29 +152,12 @@ class Experiment(object):
                 else:
                     raise
 
-            # First test for restarts
             if restart_dirs:
                 self.counter = 1 + max([int(d.lstrip('restart'))
                                         for d in restart_dirs
                                         if d.startswith('restart')])
             else:
-                # uepeat runs do not generate restart files, so check outputs
-                try:
-                    output_dirs = [d for d in os.listdir(self.archive_path)
-                                   if d.startswith('output')]
-                except OSError as exc:
-                    if exc.errno == errno.ENOENT:
-                        output_dirs = None
-                    else:
-                        raise
-
-                # First test for restarts
-                if output_dirs:
-                    self.counter = 1 + max([int(d.lstrip('output'))
-                                            for d in output_dirs
-                                            if d.startswith('output')])
-                else:
-                    self.counter = 0
+                self.counter = 0
 
     def set_stacksize(self, stacksize):
 
@@ -195,7 +177,7 @@ class Experiment(object):
 
         # MPI library
         mpi_config = self.config.get('mpi', {})
-        mpi_modname = mpi_config.get('module', 'openmpi')
+        mpi_modname = mpi_config.get('module', 'mpprun')
         self.modules.add(mpi_modname)
 
         # Unload non-essential modules
@@ -210,23 +192,13 @@ class Experiment(object):
         for mod in self.modules:
             envmod.module('load', mod)
 
-        # User-defined modules
-        user_modules = self.config.get('modules', [])
-        for mod in user_modules:
-            envmod.module('load', mod)
-
-        envmod.module('list')
-
-        for prof in self.profilers:
-            prof.load_modules()
-
         # TODO: Consolidate this profiling stuff
         c_ipm = self.config.get('ipm', False)
         if c_ipm:
             if isinstance(c_ipm, str):
                 ipm_mod = os.path.join('ipm', c_ipm)
             else:
-                ipm_mod = 'ipm/2.0.2'
+                ipm_mod = 'ipm'
 
             envmod.module('load', ipm_mod)
             os.environ['IPM_LOGDIR'] = self.work_path
@@ -236,6 +208,10 @@ class Experiment(object):
 
         if self.config.get('hpctoolkit', False):
             envmod.module('load', 'hpctoolkit')
+
+        if self.config.get('scalasca', False):
+            envmod.module('use', '/home/900/mpc900/my_modules')
+            envmod.module('load', 'scalasca')
 
         if self.config.get('scorep', False):
             envmod.module('load', 'scorep')
@@ -249,12 +225,12 @@ class Experiment(object):
         self.control_path = self.config.get('control', os.getcwd())
 
         # Experiment name
-        self.name = self.config.get('experiment',
+        expt_name = self.config.get('experiment',
                                     os.path.basename(self.control_path))
 
         # Experiment subdirectories
-        self.archive_path = os.path.join(self.lab.archive_path, self.name)
-        self.work_path = os.path.join(self.lab.work_path, self.name)
+        self.archive_path = os.path.join(self.lab.archive_path, expt_name)
+        self.work_path = os.path.join(self.lab.work_path, expt_name)
 
         # Symbolic link paths to output
         self.work_sym_path = os.path.join(self.control_path, 'work')
@@ -298,7 +274,7 @@ class Experiment(object):
             self.prior_restart_path = prior_restart_path
         else:
             self.prior_restart_path = None
-            if self.counter > 0 and not self.repeat_run:
+            if self.counter > 0:
                 # TODO: This warning should be replaced with an abort in setup
                 print('payu: warning: No restart files found.')
 
@@ -315,17 +291,13 @@ class Experiment(object):
         for model in self.models:
             model.build_model()
 
-    def setup(self, do_stripe=False, force_archive=False):
+    def setup(self, do_stripe=False):
 
         # Confirm that no output path already exists
         if os.path.exists(self.output_path):
             sys.exit('payu: error: Output path already exists.')
 
         mkdir_p(self.work_path)
-
-        if force_archive:
-            mkdir_p(self.archive_path)
-            make_symlink(self.archive_path, self.archive_sym_path)
 
         # Archive the payu config
         # TODO: This just copies the existing config.yaml file, but we should
@@ -363,12 +335,9 @@ class Experiment(object):
             prof = ProfType(self)
             self.profilers.append(prof)
 
-            # Testing
-            prof.setup()
-
     def run(self, *user_flags):
 
-        self.load_modules()
+        #self.load_modules()
 
         f_out = open(self.stdout_fname, 'w')
         f_err = open(self.stderr_fname, 'w')
@@ -390,16 +359,15 @@ class Experiment(object):
             os.environ[var] = env_value
 
         mpi_config = self.config.get('mpi', {})
-        mpi_runcmd = mpi_config.get('runcmd', 'mpirun')
+        mpi_runcmd = mpi_config.get('runcmd', 'mpprun')
 
         if self.config.get('scalasca', False):
             mpi_runcmd = ' '.join(['scalasca -analyze', mpi_runcmd])
 
-        # MPI runtime flags
-        mpi_flags = mpi_config.get('flags', [])
-        if not mpi_flags:
-            mpi_flags = self.config.get('mpirun', [])
-            # TODO: Legacy config removal warning
+        mpi_flags = self.config.get('mpprun')
+        # Correct an empty mpirun entry
+        if mpi_flags is None:
+            mpi_flags = []
 
         if type(mpi_flags) != list:
             mpi_flags = [mpi_flags]
@@ -427,14 +395,14 @@ class Experiment(object):
 
             # Update MPI library module (if not explicitly set)
             # TODO: Check for MPI library mismatch across multiple binaries
-            if mpi_module is None:
-                mpi_module = envmod.lib_update(model.exec_path, 'libmpi.so')
+            #if mpi_module is None:
+                #mpi_module = envmod.lib_update(model.exec_path, 'libmpi.so')
 
             model_prog = []
 
             # Our MPICH wrapper does not support a working directory flag
-            if not mpi_module.startswith('mvapich'):
-                model_prog.append('-wdir {}'.format(model.work_path))
+            #if not mpi_module.startswith('mvapich'):
+            #    model_prog.append('-wdir {}'.format(model.work_path))
 
             # Append any model-specific MPI flags
             model_flags = model.config.get('mpiflags', [])
@@ -451,11 +419,9 @@ class Experiment(object):
             # TODO: New Open MPI format?
             if model_npernode:
                 if model_npernode % 2 == 0:
-                    npernode_flag = ('-map-by ppr:{}:socket'
-                                     ''.format(model_npernode / 2))
+                    npernode_flag = '-npersocket {}'.format(model_npernode / 2)
                 else:
-                    npernode_flag = ('-map-by ppr:{}:node'
-                                     ''.format(model_npernode))
+                    npernode_flag = '-npernode {}'.format(model_npernode)
 
                 if self.config.get('scalasca', False):
                     npernode_flag = '\"{}\"'.format(npernode_flag)
@@ -466,8 +432,7 @@ class Experiment(object):
                 model_prog.append('hpcrun')
 
             for prof in self.profilers:
-                if prof.runscript:
-                    model_prog = model_prog.append(prof.runscript)
+                model_prog.append(prof.wrapper)
 
             model_prog.append(model.exec_prefix)
             model_prog.append(model.exec_path)
@@ -477,18 +442,16 @@ class Experiment(object):
         cmd = '{} {} {}'.format(mpi_runcmd,
                                 ' '.join(mpi_flags),
                                 ' : '.join(mpi_progs))
-
-        for prof in self.profilers:
-            cmd = prof.wrapper(cmd)
-
         print(cmd)
 
         # Our MVAPICH wrapper does not support working directories
-        if mpi_module.startswith('mvapich'):
-            curdir = os.getcwd()
-            os.chdir(self.work_path)
-        else:
-            curdir = None
+        #if mpi_module.startswith('mvapich'):
+        #    curdir = os.getcwd()
+        #    os.chdir(self.work_path)
+        #else:
+        #    curdir = None
+        curdir = os.getcwd()
+        os.chdir(self.work_path)
 
         if env:
             # TODO: Replace with mpirun -x flag inputs
@@ -549,14 +512,6 @@ class Experiment(object):
 
     def archive(self):
 
-        if not self.config.get('archive', True):
-            print('payu: not archiving due to config.yaml setting.')
-            return
-
-        # Check there is a work directory, otherwise bail
-        if not os.path.exists(self.work_sym_path):
-            sys.exit('payu: error: No work directory to archive.')
-
         mkdir_p(self.archive_path)
         make_symlink(self.archive_path, self.archive_sym_path)
 
@@ -593,15 +548,11 @@ class Experiment(object):
         for res_dir in prior_restart_dirs:
 
             res_idx = int(res_dir.lstrip('restart'))
-            if (self.repeat_run or
-                    (not res_idx % restart_freq == 0 and
-                     res_idx <= (self.counter - restart_history))):
+            if (not res_idx % restart_freq == 0 and
+                    res_idx <= (self.counter - restart_history)):
 
                 res_path = os.path.join(self.archive_path, res_dir)
-
-                # Only delete real directories; ignore symbolic restart links
-                if os.path.isdir(res_path):
-                    shutil.rmtree(res_path)
+                shutil.rmtree(res_path)
 
         if self.config.get('collate', True):
             cmd = 'payu collate -i {}'.format(self.counter)
@@ -628,7 +579,7 @@ class Experiment(object):
         """Submit a postprocessing script after collation"""
         assert self.postscript
 
-        cmd = 'qsub {}'.format(self.postscript)
+        cmd = 'sbatch {}'.format(self.postscript)
 
         cmd = shlex.split(cmd)
         rc = sp.call(cmd)
@@ -682,13 +633,12 @@ class Experiment(object):
         else:
             res_tar_path = None
 
-        for model in self.models:
-            for input_path in self.model.input_paths:
-                # Using explicit path separators to rename the input directory
-                input_cmd = rsync_cmd + '{} {}'.format(
-                    input_path + os.path.sep,
-                    os.path.join(remote_url, 'input') + os.path.sep)
-                rsync_calls.append(input_cmd)
+        for input_path in self.input_paths:
+            # Using explicit path separators to rename the input directory
+            input_cmd = rsync_cmd + '{} {}'.format(
+                input_path + os.path.sep,
+                os.path.join(remote_url, 'input') + os.path.sep)
+            rsync_calls.append(input_cmd)
 
         for cmd in rsync_calls:
             cmd = shlex.split(cmd)
@@ -788,16 +738,15 @@ class Experiment(object):
             f for f in os.listdir(os.curdir) if os.path.isfile(f) and (
                 f == self.stdout_fname or
                 f == self.stderr_fname or
-                f.startswith(short_job_name + '.o') or
-                f.startswith(short_job_name + '.e') or
-                f.startswith(short_job_name[:13] + '_c.o') or
-                f.startswith(short_job_name[:13] + '_c.e') or
-                f.startswith(short_job_name[:13] + '_p.o') or
-                f.startswith(short_job_name[:13] + '_p.e')
+                f.startswith('slurm-')
+                #f.startswith(short_job_name + '.o') or
+                #f.startswith(short_job_name + '.e') or
+                #f.startswith(short_job_name[:13] + '_c.o') or
+                #f.startswith(short_job_name[:13] + '_c.e')
             )
         ]
 
-        pbs_log_path = os.path.join(os.curdir, 'pbs_logs')
+        pbs_log_path = os.path.join(os.curdir, 'slurm_logs')
         mkdir_p(pbs_log_path)
 
         for f in logs:

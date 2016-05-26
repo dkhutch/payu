@@ -23,7 +23,7 @@ def runcmd(model_type, config_path, init_run, n_runs, lab_path, dir_path):
     pbs_config = cli.get_config(config_path)
     pbs_vars = cli.set_env_vars(init_run, n_runs, lab_path, dir_path)
 
-    collate_queue = pbs_config.get('collate_queue', 'copyq')
+    collate_queue = pbs_config.get('collate_queue', 'normal')
     pbs_config['queue'] = collate_queue
 
     n_cpus_request = pbs_config.get('collate_ncpus', 1)
@@ -33,12 +33,7 @@ def runcmd(model_type, config_path, init_run, n_runs, lab_path, dir_path):
     if 'jobname' in pbs_config:
         pbs_config['jobname'] = pbs_config['jobname'][:13] + '_c'
     else:
-        if not dir_path:
-            dpath = os.path.basename(os.getcwd())
-        else:
-            dpath = dir_path
-
-        pbs_config['jobname'] = os.path.normpath(dpath[:13]) + '_c'
+        pbs_config['jobname'] = os.path.normpath(dir_path[:15])
 
     # Replace (or remove) walltime
     collate_walltime = pbs_config.get('collate_walltime')
